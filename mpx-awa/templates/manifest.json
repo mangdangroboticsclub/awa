@@ -1,0 +1,66 @@
+{
+  "domain": "{{DOMAIN}}",
+  "version": "1.0.0",
+  "readme": "Agentic web actions for {{DOMAIN}}.",
+  "actions": {
+    "getPage": {
+      "description": "Navigate to a specific page on the site and extract its content. Provide a targetUrl, or let the handler derive it from other params.",
+      "params": {
+        "targetUrl": { "type": "string", "required": false, "description": "Full URL to navigate to. Optional if the handler can resolve the URL from other context." },
+        "section": { "type": "string", "required": false, "description": "Which section/page to visit (e.g., 'profile', 'settings', 'dashboard'). Handler-specific." }
+      },
+      "examples": [
+        {
+          "title": "Direct URL",
+          "params": { "targetUrl": "https://www.{{DOMAIN}}/page/example" },
+          "result": {}
+        }
+      ]
+    },
+    "searchContent": {
+      "description": "Search or filter content on the site (products, articles, users, etc.).",
+      "params": {
+        "query": { "type": "string", "required": true, "description": "Search term or filter query (e.g., 'keyword', 'category:books')" }
+      },
+      "example": {
+        "params": { "query": "example search" },
+        "result": {}
+      }
+    },
+    "extractData": {
+      "description": "Extract specific data from the currently loaded page — text, attributes, or structured content.",
+      "params": {
+        "selector": { "type": "string", "required": false, "description": "CSS selector for the element(s) to extract. If omitted, extracts default content." },
+        "type": { "type": "string", "required": false, "description": "What to extract: 'text', 'html', 'attribute', or leave empty for handler default." },
+        "attribute": { "type": "string", "required": false, "description": "Attribute name to extract when type is 'attribute'." }
+      },
+      "example": {
+        "params": { "selector": ".main-content", "type": "text" },
+        "result": {}
+      }
+    },
+    "fillForm": {
+      "description": "Fill and optionally submit a form on the current page.",
+      "params": {
+        "fields": { "type": "object", "required": true, "description": "Key-value pairs of form fields to fill: { '#email': 'user@example.com', '#name': 'John' }" },
+        "submitOnComplete": { "type": "boolean", "required": false, "description": "Whether to submit the form after filling (default: false)" },
+        "submitSelector": { "type": "string", "required": false, "description": "CSS selector for the submit button. Defaults to 'button[type=submit]'." }
+      },
+      "returns": {
+        "submitted": "Boolean: whether the form was submitted",
+        "fieldsFilled": "Number of fields that were filled"
+      },
+      "example": {
+        "params": { "fields": { "#email": "user@example.com", "#message": "Hello!" }, "submitOnComplete": true },
+        "result": { "submitted": true, "fieldsFilled": 2 }
+      }
+    }
+  },
+  "capabilities": ["getPage", "searchContent", "extractData", "fillForm"],
+  "urls": {
+    "home": "https://www.{{DOMAIN}}/",
+    "search": "https://www.{{DOMAIN}}/search?q={query}"
+  },
+  "timeout": 30000,
+  "memoryLimitMB": 128
+}

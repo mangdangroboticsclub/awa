@@ -1,0 +1,82 @@
+{
+  "domain": "mrbeast.store",
+  "version": "1.0.0",
+  "readme": "Shop for MrBeast merchandise and accessories on the official MrBeast store.",
+  "actions": {
+    "search": {
+      "description": "Search for products by keyword query.",
+      "params": {
+        "query": { "type": "string", "required": true, "description": "Search term (e.g., 'hoodie', 'shirt')" }
+      },
+      "example": {
+        "params": { "query": "hoodie" },
+        "result": { "query": "hoodie" }
+      }
+    },
+    "getProduct": {
+      "description": "Get detailed product info from a product page. You can provide either a handle or a targetUrl (or both).",
+      "params": {
+        "handle": { "type": "string", "required": false, "description": "Product URL handle/slug (e.g., 'limited-edition-hoodie'). Provide this or targetUrl." },
+        "targetUrl": { "type": "string", "required": false, "description": "Full URL to the product page. Provide this or handle." }
+      },
+      "examples": [
+        {
+          "title": "Using handle (URL constructed from template)",
+          "params": { "handle": "limited-edition-hoodie" },
+          "result": {}
+        },
+        {
+          "title": "Using targetUrl directly",
+          "params": { "targetUrl": "https://mrbeast.store/products/limited-edition-hoodie" },
+          "result": {}
+        }
+      ]
+    },
+    "addToCart": {
+      "description": "Add a product to the cart. If called after getProduct (already on product page), handle is optional and only quantity/options are needed. If called standalone, provide handle so the handler can navigate to the product page first.",
+      "params": {
+        "handle": { "type": "string", "required": false, "description": "Product handle. REQUIRED if not already on a product page (e.g., after getProduct was NOT called). Optional if already on the product page — you can omit it and just pass quantity." },
+        "quantity": { "type": "number", "required": false, "description": "Quantity to add (default: 1)" },
+        "options": { "type": "object", "required": false, "description": "Product variants e.g. { size: 'M', color: 'Black' }" }
+      },
+      "returns": {
+        "status": "'added' on successful add",
+        "handle": "The handle that was added",
+        "quantity": "Quantity added"
+      },
+      "examples": [
+        {
+          "title": "After getProduct — already on product page",
+          "params": { "quantity": 2 },
+          "result": { "status": "added", "handle": "limited-edition-hoodie", "quantity": 2 }
+        },
+        {
+          "title": "Standalone — not on product page",
+          "params": { "handle": "limited-edition-hoodie", "quantity": 1 },
+          "result": { "status": "added", "handle": "limited-edition-hoodie", "quantity": 1 }
+        }
+      ]
+    },
+    "getCheckoutLink": {
+      "description": "Navigate to checkout and return the checkout URL. Cart should have items.",
+      "params": {},
+      "returns": {
+        "checkoutUrl": "Full URL of the checkout page"
+      },
+      "example": {
+        "params": {},
+        "result": { "checkoutUrl": "https://mrbeast.store/checkouts/abc123" }
+      }
+    }
+  },
+  "capabilities": ["search", "getProduct", "addToCart", "getCheckoutLink"],
+  "urls": {
+    "search": "https://mrbeast.store/search?q={query}",
+    "shop": "https://mrbeast.store/collections/all",
+    "product": "https://mrbeast.store/products/:handle",
+    "cart": "https://mrbeast.store/cart",
+    "checkout": "https://mrbeast.store/checkouts"
+  },
+  "timeout": 30000,
+  "memoryLimitMB": 128
+}

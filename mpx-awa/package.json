@@ -1,0 +1,31 @@
+{
+  "name": "mpx-awa",
+  "version": "1.2.0",
+  "description": "OpenClaw Agentic Web Actions (AWA) SDK — Scaffold and develop merchant skill scripts for the AWA multi-tenant runtime engine.",
+  "keywords": [
+    "openclaw",
+    "awa",
+    "agentic-web-actions",
+    "web-automation",
+    "merchant-skills",
+    "cli"
+  ],
+  "homepage": "https://github.com/SiIverHusky/mpx-awa-sdk",
+  "license": "Apache-2.0",
+  "author": "SilverHusky",
+  "bin": {
+    "mpx-awa": "./bin/mpx-awa.js"
+  },
+  "preferGlobal": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "templates/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

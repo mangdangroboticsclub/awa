@@ -1,0 +1,105 @@
+# OpenClaw AWA Worker — Production Stack
+#
+# Spins up:
+#   1. awa-worker    — Express server with Chromium + V8 isolates
+#   2. gcs-emulator  — Fake GCS server for skill script storage
+#
+# The mpx-awa CLI (run from the host) connects to:
+#   - Worker:  http://localhost:9808
+#   - GCS:     http://localhost:4443
+#
+# Usage:
+#   docker compose up -d                    # Start the stack
+#   docker compose logs -f                  # Follow logs
+#   docker compose down                     # Stop everything
+#
+# Seeding skills and managing sessions:
+#   npx mpx-awa seed bestbuy.com           # Seed via localhost:4443
+#   AWA_WORKER_URL=http://localhost:9808 npx mpx-awa session start bestbuy.com
+#
+# See README.md for full instructions.
+
+services:
+  # ─── AWA Worker ──────────────────────────────────────────────────────────
+  awa-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: awa-worker
+    hostname: awa-worker
+    restart: unless-stopped
+    environment:
+      # Server
+      PORT: 8080
+      NODE_ENV: development
+      # GCS — uses the internal Docker hostname
+      GCS_ENDPOINT: http://gcs-emulator:4443
+      GCS_BUCKET: awa-skills-dev
+      GCS_PROJECT_ID: openclaw-dev
+      # Isolate sandbox
+      ISOLATE_MEMORY_LIMIT_MB: 128
+      ISOLATE_TIMEOUT_MS: 30000
+      ISOLATE_POOL_SIZE: 20
+      # Browser pool
+      BROWSER_POOL_SIZE: 40
+      CHROME_PATH: /usr/bin/chromium
+      PLAYWRIGHT_HEADLESS: "true"
+      # Session manager
+      SESSION_IDLE_TIMEOUT_MS: 900000
+      MAX_SESSIONS: 40
+      # Proxy (disabled for local setup)
+      PROXY_MODE: none
+      PROXY_PROVIDER_URL: ""
+      PROXY_API_KEY: ""
+      # Rate limiting
+      RATE_LIMIT_DOMAIN: 10
+      RATE_LIMIT_GLOBAL: 500
+      # Logging
+      LOG_LEVEL: info
+      # Playwright — use system Chromium
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    ports:
+      - "9808:8080"
+    depends_on:
+      gcs-emulator:
+        condition: service_started
+    # Capabilities needed for Chromium in Docker
+    cap_add:
+      - SYS_ADMIN
+    networks:
+      - awa-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ─── GCS Emulator ────────────────────────────────────────────────────────
+  gcs-emulator:
+    image: fsouza/fake-gcs-server:latest
+    container_name: awa-gcs-emulator
+    hostname: gcs-emulator
+    restart: unless-stopped
+    volumes:
+      - awa-gcs-data:/data
+    ports:
+      - "4443:4443"
+    command:
+      - "-scheme"
+      - "http"
+      - "-port"
+      - "4443"
+      - "-external-url"
+      - "http://localhost:4443"
+      - "-public-host"
+      - "localhost"
+    networks:
+      - awa-net
+
+volumes:
+  awa-gcs-data:
+
+networks:
+  awa-net:
+    driver: bridge

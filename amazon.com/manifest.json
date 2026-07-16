@@ -1,0 +1,141 @@
+{
+  "domain": "amazon.com",
+  "version": "2.5.0",
+  "readme": "Search, get product details, add to cart, read cart, remove items, change quantity, and export cart data on Amazon.com. When bot detection triggers (status: 'blocked'), the caller should: (1) wait 5-10s, then retry with humanized parameters (e.g., add typos to search queries, vary sort order/department), (2) if blocked again, kill the session and start a fresh one — the Playwright stealth plugins + residential proxy provide the foundation, but variable human-like patterns at the caller level add another layer.",
+  "actions": {
+    "search": {
+      "description": "Search Amazon for products by keyword. Returns a list of products with ASIN, title, price, rating, and image. Supports optional filters for department, price range, sort order, and condition.",
+      "params": {
+        "query": { "type": "string", "required": true, "description": "Search term (e.g., 'wireless mouse', 'laptop stand')" },
+        "department": { "type": "string", "required": false, "description": "Amazon department name like 'Electronics', 'Books', 'Clothing'" },
+        "minPrice": { "type": "number", "required": false, "description": "Minimum price filter" },
+        "maxPrice": { "type": "number", "required": false, "description": "Maximum price filter" },
+        "sortBy": { "type": "string", "required": false, "description": "Sort order: 'featured' (default), 'price-asc', 'price-desc', 'rating', 'newest'" },
+        "condition": { "type": "string", "required": false, "description": "Item condition: 'new', 'used', 'renewed'" }
+      },
+      "returns": {
+        "query": "The original search query",
+        "resultCount": "Number of organic results found",
+        "products": "Array of { asin, title, price, rating, reviewCount, imageUrl, url }",
+        "firstProduct": "The first product result (convenience for single-result flows)"
+      },
+      "example": {
+        "params": { "query": "wireless mouse", "department": "Electronics", "sortBy": "rating" },
+        "result": { "query": "wireless mouse", "resultCount": 16, "products": [{"asin":"B004YAVF8I","title":"Logitech M185 Wireless Mouse..."}] }
+      }
+    },
+    "getProduct": {
+      "description": "Get detailed product info from an Amazon product page. Provide an ASIN, a full targetUrl, or rely on being already on a product page from a previous action.",
+      "params": {
+        "asin": { "type": "string", "required": false, "description": "Amazon ASIN / product ID (e.g., 'B09G9D7K6S'). Provide this or targetUrl." },
+        "targetUrl": { "type": "string", "required": false, "description": "Full URL to the product page. Provide this or asin." }
+      },
+      "returns": {
+        "asin": "Amazon ASIN",
+        "title": "Product title",
+        "price": "Current price string (e.g., '$24.99')",
+        "imageUrl": "Product main image URL",
+        "features": "Key product features/bullets",
+        "inStock": "Boolean availability",
+        "url": "Current page URL"
+      },
+      "examples": [
+        {
+          "title": "Using ASIN",
+          "params": { "asin": "B004YAVF8I" },
+          "result": { "asin": "B004YAVF8I", "title": "Logitech M185 Wireless Mouse...", "price": "$14.99" }
+        },
+        {
+          "title": "Using targetUrl",
+          "params": { "targetUrl": "https://www.amazon.com/dp/B004YAVF8I" },
+          "result": { "asin": "B004YAVF8I", "title": "Logitech M185 Wireless Mouse..." }
+        }
+      ]
+    },
+    "addToCart": {
+      "description": "Add a product to the Amazon cart. If called after getProduct (already on product page), asin is optional. If called standalone, provide asin so the handler navigates to the product page first. Amazon adds via the #add-to-cart-button on the product page.",
+      "params": {
+        "asin": { "type": "string", "required": false, "description": "Amazon ASIN. REQUIRED if not already on a product page (e.g., when called standalone). Optional if already on the product page." },
+        "quantity": { "type": "number", "required": false, "description": "Quantity to add (default: 1)" }
+      },
+      "returns": {
+        "status": "'success', 'failed', or 'protected'",
+        "asin": "The ASIN that was added",
+        "quantity": "Quantity requested",
+        "productUrl": "Product page URL (returned when status='protected')",
+        "agentInstruction": "Guidance for OpenClaw agent on how to handle this item in cart export (returned when status='protected')"
+      },
+      "examples": [
+        {
+          "title": "After getProduct — already on product page",
+          "params": { "quantity": 1 },
+          "result": { "status": "success", "asin": "B004YAVF8I" }
+        },
+        {
+          "title": "Standalone — navigate to product first",
+          "params": { "asin": "B004YAVF8I", "quantity": 1 },
+          "result": { "status": "success", "asin": "B004YAVF8I" }
+        },
+        {
+          "title": "Protected product — button clicked but Amazon blocked the add",
+          "params": { "asin": "B0EXAMPLE123", "quantity": 1 },
+          "result": { "status": "protected", "asin": "B0EXAMPLE123", "quantity": 1, "productUrl": "https://www.amazon.com/dp/B0EXAMPLE123", "agentInstruction": "This product has anti-bot protection..." }
+        }
+      ]
+    },
+    "readCart": {
+      "description": "Read the current contents of the Amazon shopping cart. Returns a list of items with ASIN, title, quantity, price, and direct product URLs.",
+      "params": {},
+      "returns": {
+        "status": "'success'",
+        "itemCount": "Total number of items in cart",
+        "items": "Array of { asin, title, quantity, price, imageUrl, productUrl }",
+        "cartTotal": "Estimated total string (e.g., '$24.99')",
+        "subtotal": "Cart subtotal string",
+        "shareUrl": "Amazon share-cart link or null"
+      },
+      "example": {
+        "params": {},
+        "result": { "status": "success", "itemCount": 2, "items": [{"asin":"B004YAVF8I","title":"Logitech M185...","quantity":1,"price":"$14.99","productUrl":"https://www.amazon.com/dp/B004YAVF8I"}], "cartTotal": "$14.99" }
+      }
+    },
+    "removeFromCart": {
+      "description": "Remove an item from the Amazon cart by ASIN. Returns the updated cart contents with remaining items for the agent to display.",
+      "params": {
+        "asin": { "type": "string", "required": true, "description": "Amazon ASIN of the item to remove (e.g., 'B0D9MK23S7')" }
+      },
+      "returns": {
+        "status": "'success' or 'failed'",
+        "removed": "{ asin, wasRemoved: boolean }",
+        "remainingItems": "Array of remaining cart items",
+        "remainingCount": "Number of items still in cart"
+      },
+      "example": {
+        "params": { "asin": "B004YAVF8I" },
+        "result": { "status": "success", "removed": { "asin": "B004YAVF8I", "wasRemoved": true }, "remainingItems": [], "remainingCount": 0 }
+      }
+    },
+    "getCartExport": {
+      "description": "Export the cart contents as structured data for the OpenClaw agent to render as a Markdown table. Each item includes its product URL for the user to open in their own browser. No share-cart link since Amazon guest carts don't support sharing without extensions.",
+      "params": {},
+      "returns": {
+        "status": "'success'",
+        "itemCount": "Total number of items in cart",
+        "items": "Array of { asin, title, quantity, price, productUrl } — ready for Markdown table rendering",
+        "cartTotal": "Estimated total string (e.g., '$24.99')"
+      },
+      "example": {
+        "params": {},
+        "result": { "status": "success", "itemCount": 2, "items": [{"asin":"B004YAVF8I","title":"Logitech M185...","quantity":1,"price":"$14.99","productUrl":"https://www.amazon.com/dp/B004YAVF8I"}], "cartTotal": "$14.99" }
+      }
+    }
+  },
+  "capabilities": ["search", "getProduct", "addToCart", "readCart", "removeFromCart", "changeCartQuantity", "getCartExport"],
+  "urls": {
+    "search": "https://www.amazon.com/s?k={query}",
+    "product": "https://www.amazon.com/dp/:asin",
+    "cart": "https://www.amazon.com/gp/cart/view.html"
+  },
+  "timeout": 30000,
+  "memoryLimitMB": 128
+}

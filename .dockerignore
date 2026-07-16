@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# Version control
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tests and coverage
+coverage/
+tests/
+
+# Documentation
+docs/
+
+# Dev container
+.devcontainer/
+
+# Other projects
+mpx-awa/node_modules/
+amazon.com/
+mrbeast.store/
+
+# Temp files
+*.swp
+*.swo
+*~
