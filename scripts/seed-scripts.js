@@ -12,7 +12,7 @@
  *
  * Environment variables:
  *   GCS_ENDPOINT   — GCS endpoint (set to emulator URL in dev)
- *   GCS_BUCKET     — Bucket name (default: awa-skills-dev)
+ *   GCS_BUCKET     — Bucket name (default: mpx-marketplace-artifacts)
  *   GCS_PROJECT_ID — GCP project ID (default: openclaw-dev)
  */
 
@@ -22,7 +22,7 @@ const fs = require("fs");
 const path = require("path");
 const { Storage } = require("@google-cloud/storage");
 
-const BUCKET = process.env.GCS_BUCKET || "awa-skills-dev";
+const BUCKET = process.env.GCS_BUCKET || "mpx-marketplace-artifacts";
 const FIXTURES_DIR = path.join(__dirname, "..", "tests", "fixtures", "scripts");
 const LOCAL_GCS_DIR = path.join(__dirname, "..", "data", "gcs", BUCKET, "user-scripts");
 

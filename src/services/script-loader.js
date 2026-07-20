@@ -39,7 +39,11 @@ class LRUCache {
 }
 
 // ---------------------------------------------------------------------------
-// Script Loader — fetches both manifest.json and skill.js per domain
+// Script Loader — fetches both manifest.json and skill.js per skill
+//
+// GCS path structure:
+//   skills/{skillId}/versions/{version}/skill.js
+//   skills/{skillId}/versions/{version}/manifest.json
 // ---------------------------------------------------------------------------
 
 class ScriptLoader {
@@ -77,25 +81,25 @@ class ScriptLoader {
   }
 
   /** Cache key helpers */
-  _manifestKey(domain) { return `manifest:${domain}`; }
-  _scriptKey(domain) { return `script:${domain}`; }
+  _manifestKey(skillId, version) { return `manifest:${skillId}:${version}`; }
+  _scriptKey(skillId, version) { return `script:${skillId}:${version}`; }
 
   /**
-   * Fetch the skill manifest for a domain.
-   * Path: user-scripts/<domain>/manifest.json
+   * Fetch the skill manifest for a skill ID + version.
+   * Path: skills/<skillId>/versions/<version>/manifest.json
    */
-  async fetchManifest(domain) {
-    const key = this._manifestKey(domain);
+  async fetchManifest(skillId, version) {
+    const key = this._manifestKey(skillId, version);
     const cached = this._cache.get(key);
-    if (cached) { logger.debug("ScriptLoader: manifest cache hit", { domain }); return cached; }
+    if (cached) { logger.debug("ScriptLoader: manifest cache hit", { skillId, version }); return cached; }
 
-    logger.debug("ScriptLoader: fetching manifest", { domain });
+    logger.debug("ScriptLoader: fetching manifest", { skillId, version });
     try {
       let data;
       if (this.useLocalFallback) {
-        data = await this._readLocalFile(domain, "manifest.json");
+        data = await this._readLocalFile(skillId, version, "manifest.json");
       } else {
-        data = await this._readGCSFile(domain, "manifest.json");
+        data = await this._readGCSFile(skillId, version, "manifest.json");
       }
       if (data) {
         const parsed = JSON.parse(data);
@@ -104,65 +108,65 @@ class ScriptLoader {
       }
       return null;
     } catch (err) {
-      logger.error("ScriptLoader: failed to fetch manifest", { domain, error: err.message });
+      logger.error("ScriptLoader: failed to fetch manifest", { skillId, version, error: err.message });
       return null;
     }
   }
 
   /**
-   * Fetch the skill script source for a domain.
-   * Path: user-scripts/<domain>/skill.js
+   * Fetch the skill script source for a skill ID + version.
+   * Path: skills/<skillId>/versions/<version>/skill.js
    */
-  async fetchScript(domain) {
-    const key = this._scriptKey(domain);
+  async fetchScript(skillId, version) {
+    const key = this._scriptKey(skillId, version);
     const cached = this._cache.get(key);
-    if (cached) { logger.debug("ScriptLoader: script cache hit", { domain }); return cached; }
+    if (cached) { logger.debug("ScriptLoader: script cache hit", { skillId, version }); return cached; }
 
-    logger.debug("ScriptLoader: fetching script", { domain });
+    logger.debug("ScriptLoader: fetching script", { skillId, version });
     try {
       let source;
       if (this.useLocalFallback) {
-        source = await this._readLocalFile(domain, "skill.js");
+        source = await this._readLocalFile(skillId, version, "skill.js");
       } else {
-        source = await this._readGCSFile(domain, "skill.js");
+        source = await this._readGCSFile(skillId, version, "skill.js");
       }
       if (source) {
         this._cache.set(key, source);
-        logger.debug("ScriptLoader: script loaded and cached", { domain, size: source.length });
+        logger.debug("ScriptLoader: script loaded and cached", { skillId, version, size: source.length });
       }
       return source;
     } catch (err) {
-      logger.error("ScriptLoader: failed to fetch script", { domain, error: err.message });
+      logger.error("ScriptLoader: failed to fetch script", { skillId, version, error: err.message });
       return null;
     }
   }
 
-  /** Backward-compatible alias */
-  async fetch(domain) { return this.fetchScript(domain); }
+  /** Backward-compatible alias (deprecated) */
+  async fetch(skillId, version) { return this.fetchScript(skillId, version); }
 
-  async _readLocalFile(domain, filename) {
+  async _readLocalFile(skillId, version, filename) {
     const fs = require("fs");
     const path = require("path");
-    const filePath = path.join(this.localBasePath, this.bucketName, "user-scripts", domain, filename);
+    const filePath = path.join(this.localBasePath, this.bucketName, "skills", skillId, "versions", version, filename);
     try {
       return await fs.promises.readFile(filePath, "utf-8");
     } catch (err) {
       if (err.code === "ENOENT") {
-        logger.debug("ScriptLoader: local file not found", { domain, file: filename, path: filePath });
+        logger.debug("ScriptLoader: local file not found", { skillId, version, file: filename, path: filePath });
         return null;
       }
       throw err;
     }
   }
 
-  async _readGCSFile(domain, filename) {
-    const objectKey = `user-scripts/${domain}/${filename}`;
+  async _readGCSFile(skillId, version, filename) {
+    const objectKey = `skills/${skillId}/versions/${version}/${filename}`;
     try {
       const [contents] = await this.bucket.file(objectKey).download();
       return contents.toString("utf-8");
     } catch (err) {
       if (err.code === 404) {
-        logger.debug("ScriptLoader: GCS file not found", { domain, key: objectKey });
+        logger.debug("ScriptLoader: GCS file not found", { skillId, key: objectKey });
         return null;
       }
       throw err;

@@ -1,100 +1,102 @@
 "use strict";
 
 /**
- * mpx-awa list — List all seeded skills in the GCS bucket.
+ * mpx-awa list — List all skills in the MPX marketplace.
  *
- * Queries the GCS emulator (or real GCS) for objects under user-scripts/
- * and extracts unique domain names.
+ * Calls GET /v1/skills on the gateway and displays a table.
  *
- * Usage: mpx-awa list
+ * Usage:
+ *   mpx-awa list
+ *   MPX_GATEWAY_URL=http://<gateway-host>:8080 mpx-awa list
+ *
+ * Supported flags (before subcommand):
+ *   --gateway <url>   Override the gateway URL
  */
 
+const https = require("https");
 const http = require("http");
 
-const GCS_EMULATOR = process.env.GCS_EMULATOR_URL || "http://localhost:4443";
-const BUCKET = process.env.GCS_BUCKET || "awa-skills-dev";
-
-module.exports = function listSkills() {
-  console.log(`Fetching skills from GCS bucket "${BUCKET}"...`);
-  console.log(`  Emulator: ${GCS_EMULATOR}`);
-  console.log("");
-
-  const listUrl = `${GCS_EMULATOR}/storage/v1/b/${BUCKET}/o?prefix=user-scripts/`;
-
-  httpGet(listUrl, (err, body) => {
-    if (err) {
-      console.error(`  ✗ Failed to list skills: ${err.message}`);
-      process.exit(1);
-    }
-
-    let data;
-    try {
-      data = JSON.parse(body);
-    } catch {
-      console.error("  ✗ Invalid response from GCS emulator");
-      process.exit(1);
-    }
-
-    const items = data.items || [];
-    if (items.length === 0) {
-      console.log("  No skills found in bucket.");
-      return;
-    }
-
-    // Extract unique domain names from object paths like
-    // "user-scripts/bestbuy.com/manifest.json"
-    const domains = new Set();
-    for (const item of items) {
-      const match = item.name.match(/^user-scripts\/([^/]+)\//);
-      if (match) domains.add(match[1]);
-    }
-
-    const sorted = [...domains].sort();
-
-    console.log(`  Found ${sorted.length} skill(s):\n`);
-    for (const domain of sorted) {
-      const hasManifest = items.some(
-        (i) => i.name === `user-scripts/${domain}/manifest.json`
-      );
-      const hasScript = items.some(
-        (i) => i.name === `user-scripts/${domain}/skill.js`
-      );
-
-      const files = [];
-      if (hasManifest) files.push("manifest.json");
-      if (hasScript) files.push("skill.js");
-      console.log(`  ${domain}`);
-      console.log(`    Files: ${files.join(", ")}`);
-      console.log("");
-    }
-  });
-};
-
-/**
- * Simple HTTP GET.
- */
-function httpGet(url, callback) {
-  const urlObj = new URL(url);
-  const options = {
-    hostname: urlObj.hostname,
-    port: urlObj.port,
-    path: urlObj.pathname + urlObj.search,
-    method: "GET",
-    timeout: 10000,
-  };
-
-  const req = http.request(options, (res) => {
-    let body = "";
-    res.on("data", (chunk) => (body += chunk));
-    res.on("end", () => {
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        callback(null, body);
-      } else {
-        callback(new Error(`HTTP ${res.statusCode}: ${body.slice(0, 200)}`));
-      }
-    });
-  });
-
-  req.on("error", callback);
-  req.end();
+function getGatewayUrl(hostOpt) {
+  return hostOpt || process.env.MPX_GATEWAY_URL || "http://localhost:8080";
 }
+
+function apiGet(url) {
+  const urlObj = new URL(url);
+  const mod = urlObj.protocol === "https:" ? https : http;
+
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: urlObj.hostname,
+      port: urlObj.port,
+      path: urlObj.pathname + urlObj.search,
+      method: "GET",
+      timeout: 15000,
+    };
+
+    const req = mod.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        try {
+          resolve({ status: res.statusCode, body: JSON.parse(data) });
+        } catch {
+          resolve({ status: res.statusCode, body: { raw: data } });
+        }
+      });
+    });
+
+    req.on("error", (err) => reject(err));
+    req.on("timeout", () => { req.destroy(); reject(new Error("Request timed out")); });
+    req.end();
+  });
+}
+
+module.exports = function listSkills(hostOpt) {
+  const gatewayUrl = getGatewayUrl(hostOpt);
+  const skillsUrl = `${gatewayUrl.replace(/\/+$/, "")}/v1/skills`;
+
+  console.log(`Fetching marketplace skills from ${gatewayUrl}...\n`);
+
+  apiGet(skillsUrl)
+    .then((res) => {
+      if (res.status !== 200) {
+        const msg = res.body.error || `HTTP ${res.status}`;
+        console.error(`  ✗ Failed to list skills: ${msg}`);
+        process.exit(1);
+      }
+
+      const skills = res.body;
+      if (!Array.isArray(skills) || skills.length === 0) {
+        console.log("  No skills found in the marketplace.");
+        return;
+      }
+
+      // Calculate column widths
+      const idWidth = Math.max(...skills.map((s) => (s.id || "").length), 4);
+      const titleWidth = Math.max(...skills.map((s) => (s.title || "").length), 5);
+      const typeWidth = Math.max(...skills.map((s) => (s.skill_type || "").length), 4);
+      const versionWidth = Math.max(...skills.map((s) => (s.current_version || "").length), 7);
+
+      const line = (pad = " ") =>
+        `  ${pad}${"─".repeat(idWidth + titleWidth + typeWidth + versionWidth + 9)}`;
+
+      console.log(line());
+      console.log(
+        `  │ ${"ID".padEnd(idWidth)} │ ${"Title".padEnd(titleWidth)} │ ${"Type".padEnd(typeWidth)} │ ${"Version".padEnd(versionWidth)} │`
+      );
+      console.log(line("├"));
+
+      for (const skill of skills) {
+        console.log(
+          `  │ ${(skill.id || "").padEnd(idWidth)} │ ${(skill.title || "").padEnd(titleWidth)} │ ${(skill.skill_type || "").padEnd(typeWidth)} │ ${(skill.current_version || "").padEnd(versionWidth)} │`
+        );
+      }
+
+      console.log(line("└"));
+      console.log(`  ${skills.length} skill(s) total.\n`);
+    })
+    .catch((err) => {
+      console.error(`  ✗ Connection failed: ${err.message}`);
+      process.exit(1);
+    });
+};

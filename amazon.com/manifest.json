@@ -1,5 +1,9 @@
 {
   "domain": "amazon.com",
+  "slug": "amazon",
+  "title": "Amazon Shopping Skill",
+  "skill_type": "AWA",
+  "source_language": "javascript",
   "version": "2.5.0",
   "readme": "Search, get product details, add to cart, read cart, remove items, change quantity, and export cart data on Amazon.com. When bot detection triggers (status: 'blocked'), the caller should: (1) wait 5-10s, then retry with humanized parameters (e.g., add typos to search queries, vary sort order/department), (2) if blocked again, kill the session and start a fresh one — the Playwright stealth plugins + residential proxy provide the foundation, but variable human-like patterns at the caller level add another layer.",
   "actions": {

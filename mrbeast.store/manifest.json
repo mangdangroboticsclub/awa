@@ -1,5 +1,9 @@
 {
   "domain": "mrbeast.store",
+  "slug": "mrbeast",
+  "title": "MrBeast Store Shopping Skill",
+  "skill_type": "AWA",
+  "source_language": "javascript",
   "version": "1.0.0",
   "readme": "Shop for MrBeast merchandise and accessories on the official MrBeast store.",
   "actions": {

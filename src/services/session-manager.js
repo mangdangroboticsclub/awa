@@ -35,7 +35,7 @@ class SessionManager {
    * @param {string} resources.domain - Merchant domain
    * @returns {object} Session info object
    */
-  async create({ sessionCtx, browserSession, manifest, domain }) {
+  async create({ sessionCtx, browserSession, manifest, domain, robotUuid }) {
     if (this.sessions.size >= MAX_SESSIONS) {
       throw Object.assign(new Error("All worker slots are busy. Retry later."), {
         code: "SESSION_LIMIT_REACHED",
@@ -48,6 +48,7 @@ class SessionManager {
     const session = {
       id: sessionId,
       domain,
+      robotUuid,
       manifest,
       sessionCtx,
       browserSession,

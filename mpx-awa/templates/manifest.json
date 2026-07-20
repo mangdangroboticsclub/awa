@@ -1,6 +1,10 @@
 {
   "domain": "{{DOMAIN}}",
-  "version": "1.0.0",
+  "slug": "{{SLUG}}",
+  "title": "{{DOMAIN}} merchant skill",
+  "skill_type": "AWA",
+  "source_language": "javascript",
+  "version": "{{VERSION}}",
   "readme": "Agentic web actions for {{DOMAIN}}.",
   "actions": {
     "getPage": {

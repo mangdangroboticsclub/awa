@@ -2,22 +2,21 @@
 #
 # Spins up:
 #   1. awa-worker    — Express server with Chromium + V8 isolates
-#   2. gcs-emulator  — Fake GCS server for skill script storage
+#
+# Note: GCS emulator is now shared — run ~/mpx-gcp-cloudstorage/docker-compose.yml separately.
 #
 # The mpx-awa CLI (run from the host) connects to:
 #   - Worker:  http://localhost:9808
 #   - GCS:     http://localhost:4443
 #
 # Usage:
-#   docker compose up -d                    # Start the stack
+#   docker compose up -d                    # Start the worker
 #   docker compose logs -f                  # Follow logs
 #   docker compose down                     # Stop everything
 #
 # Seeding skills and managing sessions:
 #   npx mpx-awa seed bestbuy.com           # Seed via localhost:4443
 #   AWA_WORKER_URL=http://localhost:9808 npx mpx-awa session start bestbuy.com
-#
-# See README.md for full instructions.
 
 services:
   # ─── AWA Worker ──────────────────────────────────────────────────────────
@@ -25,16 +24,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: awa-worker
+    container_name: gcp-cloudrun-awa-worker
     hostname: awa-worker
     restart: unless-stopped
     environment:
       # Server
       PORT: 8080
       NODE_ENV: development
-      # GCS — uses the internal Docker hostname
-      GCS_ENDPOINT: http://gcs-emulator:4443
-      GCS_BUCKET: awa-skills-dev
+      # GCS — shared emulator on the mesh
+      GCS_ENDPOINT: http://cloudstorage-emulator:4443
+      GCS_BUCKET: mpx-marketplace-artifacts
       GCS_PROJECT_ID: openclaw-dev
       # Isolate sandbox
       ISOLATE_MEMORY_LIMIT_MB: 128
@@ -47,10 +46,42 @@ services:
       # Session manager
       SESSION_IDLE_TIMEOUT_MS: 900000
       MAX_SESSIONS: 40
-      # Proxy (disabled for local setup)
+      # ╔══════════════════════════════════════════════════════════════════╗
+      # ║  PROXY CONFIGURATION — REQUIRED FOR AMAZON                      ║
+      # ║                                                                  ║
+      # ║  Amazon aggressively blocks datacenter IPs and headless browsers.║
+      # ║  Without a residential proxy, all Amazon skill actions will      ║
+      # ║  return status="blocked".                                        ║
+      # ║                                                                  ║
+      # ║  Set PROXY_MODE=residential and configure a provider below.      ║
+      # ╚══════════════════════════════════════════════════════════════════╝
+      #
+      # ─── Mode ───────────────────────────────────────────────────────────
+      # "none"          — Direct connection (local dev, non-Amazon skills only)
+      # "residential"   — Rotating residential proxy (required for Amazon)
       PROXY_MODE: none
+      #
+      # ─── Required (when PROXY_MODE=residential) ────────────────────────
+      # The full proxy URL with authentication.
+      #
+      # Brightdata (recommended — best Amazon coverage):
+      #   PROXY_PROVIDER_URL=http://brd-customer-<CUSTOMER_ID>-zone-<ZONE>:<PASSWORD>@zproxy.lum-superproxy.io:22225
+      # Oxylabs:
+      #   PROXY_PROVIDER_URL=http://customer-<CUSTOMER>:<PASS>@pr.oxylabs.io:7777
+      # Smartproxy:
+      #   PROXY_PROVIDER_URL=http://<USER>:<PASS>@gate.smartproxy.com:10000
+      # IPRoyal:
+      #   PROXY_PROVIDER_URL=http://<TOKEN>:@residential.iproyal.com:12323
       PROXY_PROVIDER_URL: ""
+      #
+      # ─── API Key (optional, for providers that need it separate from URL) ─
+      # Use {API_KEY} placeholder in PROXY_PROVIDER_URL if you want it substituted.
       PROXY_API_KEY: ""
+      #
+      # ─── Country filter (optional) ──────────────────────────────────────
+      # Restricts proxy IPs to a specific country (e.g., "US" for Amazon US).
+      # Uses Brightdata's -country- suffix convention.
+      PROXY_COUNTRY: ""
       # Rate limiting
       RATE_LIMIT_DOMAIN: 10
       RATE_LIMIT_GLOBAL: 500
@@ -60,14 +91,11 @@ services:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     ports:
       - "9808:8080"
-    depends_on:
-      gcs-emulator:
-        condition: service_started
     # Capabilities needed for Chromium in Docker
     cap_add:
       - SYS_ADMIN
     networks:
-      - awa-net
+      - mpx-gcp-mesh
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/healthz"]
       interval: 30s
@@ -75,31 +103,7 @@ services:
       retries: 3
       start_period: 30s
 
-  # ─── GCS Emulator ────────────────────────────────────────────────────────
-  gcs-emulator:
-    image: fsouza/fake-gcs-server:latest
-    container_name: awa-gcs-emulator
-    hostname: gcs-emulator
-    restart: unless-stopped
-    volumes:
-      - awa-gcs-data:/data
-    ports:
-      - "4443:4443"
-    command:
-      - "-scheme"
-      - "http"
-      - "-port"
-      - "4443"
-      - "-external-url"
-      - "http://localhost:4443"
-      - "-public-host"
-      - "localhost"
-    networks:
-      - awa-net
-
-volumes:
-  awa-gcs-data:
-
 networks:
-  awa-net:
-    driver: bridge
+  mpx-gcp-mesh:
+    external:
+      name: mpx-shared-mesh

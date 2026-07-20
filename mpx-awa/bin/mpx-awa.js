@@ -6,11 +6,14 @@
  *
  * Commands:
  *   init <domain>              Scaffold a new skill
- *   seed <domain>              Seed a skill to the GCS emulator
- *   list                       List all seeded skills in the bucket
- *   delete <domain>            Delete a skill from the bucket
- *   readme <domain>            Show a skill's README/help
- *   readme <domain> --set ...  Set/update a skill's README
+ *   init <slug>@<domain>       Multiple skills for same domain
+ *   signup                     Interactive registration with hidden password
+ *   login <user> <pass>        Authenticate and store a JWT token
+ *   logout                     Clear the stored JWT token
+ *   publish <domain>           Publish a skill to the marketplace
+ *   list                       List all marketplace skills
+ *   versions <skill_id>        List versions of a skill
+ *   readme <skill_id>          Show manifest JSON for a skill
  *   session start <domain>     Create a new session
  *   session list               List active sessions
  *   session get <id>           Get session status
@@ -18,6 +21,9 @@
  *   session end <id>           End a session
  *   --help                     Show help
  *   --version                  Show version
+ *
+ * Gateway host (for login/publish):
+ *   Set MPX_GATEWAY_URL env var, or pass --gateway <url> before the subcommand.
  */
 
 const CLI_NAME = "mpx-awa";
@@ -27,53 +33,59 @@ function printHelp() {
   console.log(`
 ${CLI_NAME} v${CLI_VERSION} — OpenClaw Agentic Web Actions SDK
 
-  CLI for scaffolding, seeding, and testing AWA merchant skills.
+  CLI for scaffolding, publishing, and testing AWA merchant skills.
 
 USAGE
 
   Scaffolding:
-    ${CLI_NAME} init <domain>              Create a new skill scaffold
+    ${CLI_NAME} init <domain>                   Create a new skill scaffold
+    ${CLI_NAME} init <slug>@<domain>            Multiple skills for same domain
 
-  Skill management (requires GCS emulator at GCS_EMULATOR_URL):
-    ${CLI_NAME} seed <domain>              Upload skill to GCS emulator
-    ${CLI_NAME} list                       List all seeded skills
-    ${CLI_NAME} delete <domain>            Delete a skill from the bucket
-    ${CLI_NAME} readme <domain>            Show a skill's README
-    ${CLI_NAME} readme <domain> --set ...  Set/update a skill's README
+  Marketplace discovery (requires MPX gateway):
+    ${CLI_NAME} list                             List all marketplace skills
+    ${CLI_NAME} robot <uuid>                     Show robot info and assigned skills
+    ${CLI_NAME} versions <skill_id>              List versions of a skill
+    ${CLI_NAME} readme <skill_id>                Show manifest JSON for a skill
+
+  Authentication & publishing (requires MPX gateway):
+    ${CLI_NAME} signup                           Register a new account
+    ${CLI_NAME} login <username> <password>      Authenticate and store token
+    ${CLI_NAME} logout                           Clear the stored token
+    ${CLI_NAME} publish <domain>                 Publish skill to marketplace
 
   Session management (requires worker at AWA_WORKER_URL, default http://localhost:9808):
-    ${CLI_NAME} session start <domain>     Create a new session
-    ${CLI_NAME} session list               List active sessions
-    ${CLI_NAME} session get <id>           Get session status
+    ${CLI_NAME} session start <skill_id>         Create a new session
+    ${CLI_NAME} session list                     List active sessions
+    ${CLI_NAME} session get <id>                 Get session status
     ${CLI_NAME} session action <id> <action> [params]  Dispatch action
-    ${CLI_NAME} session end <id>           End a session
+    ${CLI_NAME} session end <id>                 End a session
 
   General:
-    ${CLI_NAME} --help                     Show this help
-    ${CLI_NAME} --version                  Show version
+    ${CLI_NAME} --help                           Show this help
+    ${CLI_NAME} --version                        Show version
 
 EXAMPLES
 
   # Scaffold a skill
   ${CLI_NAME} init bestbuy.com
+  ${CLI_NAME} init price-tracker@bestbuy.com    # second skill for same site
 
-  # Seed to GCS emulator
-  ${CLI_NAME} seed bestbuy.com
+  # Login (stored token at ~/.mpx-awa-token)
+  ${CLI_NAME} login haris_dev password123
+  MPX_GATEWAY_URL=http://<gateway-host>:8080 ${CLI_NAME} login mangdang_dev pupper_secure
 
-  # List all seeded skills
+  # List and discover skills
   ${CLI_NAME} list
+  ${CLI_NAME} versions haris_dev~my-scraper
+  ${CLI_NAME} readme haris_dev~my-scraper
+  ${CLI_NAME} readme haris_dev~my-scraper --version v1.0.0
 
-  # Delete a skill from the bucket
-  ${CLI_NAME} delete bestbuy.com
+  # Publish to the gateway
+  ${CLI_NAME} publish bestbuy.com
+  MPX_GATEWAY_URL=http://<gateway-host>:8080 ${CLI_NAME} publish amazon.com
 
-  # View a skill's README
-  ${CLI_NAME} readme bestbuy.com
-
-  # Set a skill's README
-  ${CLI_NAME} readme bestbuy.com --set "Search and purchase products on BestBuy."
-
-  # Start a session
-  ${CLI_NAME} session start bestbuy.com
+  # Start a session against the worker
+  ${CLI_NAME} session start haris_dev~amazon
 
   # Dispatch actions
   ${CLI_NAME} session action sess_abc search '{"query":"laptop"}'
@@ -83,13 +95,20 @@ EXAMPLES
 ENVIRONMENT
 
   AWA_WORKER_URL     Worker URL (default: http://localhost:9808)
-  GCS_EMULATOR_URL   GCS emulator URL (default: http://localhost:4443)
-  GCS_BUCKET         GCS bucket name (default: awa-skills-dev)
+  MPX_GATEWAY_URL    Gateway URL (default: http://localhost:8080)
 `);
 }
 
 function main() {
-  const args = process.argv.slice(2);
+  let args = process.argv.slice(2);
+  let hostOpt = null;
+
+  // Extract --gateway <url> if present (global before subcommand)
+  const gwIdx = args.indexOf("--gateway");
+  if (gwIdx !== -1 && args[gwIdx + 1]) {
+    hostOpt = args[gwIdx + 1];
+    args = args.filter((_, i) => i !== gwIdx && i !== gwIdx + 1);
+  }
 
   if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
     printHelp();
@@ -108,41 +127,74 @@ function main() {
     return;
   }
 
-  if (args[0] === "seed") {
-    const domain = args[1];
-    if (!domain) { console.error("Error: missing domain.\nUsage: mpx-awa seed <domain>"); process.exit(1); }
-    require("../src/commands/seed")(domain);
+  if (args[0] === "signup") {
+    require("../src/commands/signup")(hostOpt);
+    return;
+  }
+
+  if (args[0] === "logout") {
+    require("../src/commands/logout")();
+    return;
+  }
+
+  if (args[0] === "login") {
+    const username = args[1];
+    const password = args[2];
+    if (!username || !password) {
+      console.error("Error: missing arguments.\nUsage: mpx-awa login <username> <password>");
+      process.exit(1);
+    }
+    require("../src/commands/login")(username, password, hostOpt);
     return;
   }
 
   if (args[0] === "list") {
-    require("../src/commands/list")();
+    require("../src/commands/list")(hostOpt);
     return;
   }
 
-  if (args[0] === "delete") {
-    const domain = args[1];
-    if (!domain) { console.error("Error: missing domain.\nUsage: mpx-awa delete <domain>"); process.exit(1); }
-    require("../src/commands/delete")(domain);
+  if (args[0] === "versions") {
+    const skillId = args[1];
+    if (!skillId) {
+      console.error("Error: missing skill_id.\nUsage: mpx-awa versions <skill_id>");
+      process.exit(1);
+    }
+    require("../src/commands/versions")(skillId, hostOpt);
     return;
   }
 
   if (args[0] === "readme") {
-    const domain = args[1];
-    if (!domain) { console.error("Error: missing domain.\nUsage: mpx-awa readme <domain> [--set <text>|--json]"); process.exit(1); }
-
-    const setIdx = args.indexOf("--set");
-    const jsonFlag = args.includes("--json");
-
-    if (setIdx !== -1 && args[setIdx + 1]) {
-      // Readme text is everything after --set
-      const setText = args.slice(setIdx + 1).join(" ");
-      require("../src/commands/readme")(domain, setText);
-    } else if (jsonFlag) {
-      require("../src/commands/readme")(domain, { json: true });
-    } else {
-      require("../src/commands/readme")(domain);
+    const skillId = args[1];
+    if (!skillId) {
+      console.error("Error: missing skill_id.\nUsage: mpx-awa readme <skill_id>");
+      process.exit(1);
     }
+    // Check for --json flag on this subcommand
+    const jsonFlag = args.includes("--json");
+    // Check for --version flag on this subcommand
+    const versionIdx = args.indexOf("--version");
+    const versionOpt = versionIdx !== -1 && args[versionIdx + 1] ? args[versionIdx + 1] : null;
+    require("../src/commands/readme")(skillId, { host: hostOpt, json: jsonFlag, version: versionOpt });
+    return;
+  }
+
+  if (args[0] === "robot") {
+    const uuid = args[1];
+    if (!uuid) {
+      console.error("Error: missing robot UUID.\nUsage: mpx-awa robot <uuid>");
+      process.exit(1);
+    }
+    require("../src/commands/robot")(uuid, hostOpt);
+    return;
+  }
+
+  if (args[0] === "publish") {
+    const domain = args[1];
+    if (!domain) {
+      console.error("Error: missing domain.\nUsage: mpx-awa publish <domain>");
+      process.exit(1);
+    }
+    require("../src/commands/publish")(domain, hostOpt);
     return;
   }
 

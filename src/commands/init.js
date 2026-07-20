@@ -67,8 +67,8 @@ module.exports = function init(domain) {
   console.log("    # Edit manifest.json — add your merchant's URL patterns");
   console.log("    # Edit skill.js — implement handler functions");
   console.log("    # Read GUIDE.md for API reference and best practices");
-  console.log("    # Upload to GCS:");
-  console.log(`    gcloud storage cp manifest.json gs://awa-skills-prod/user-scripts/${domain}/`);
-  console.log(`    gcloud storage cp skill.js gs://awa-skills-prod/user-scripts/${domain}/`);
+  console.log("    # Publish via gateway (uploads to skills/{skill_id}/versions/{version}/):");
+  console.log(`    mpx-awa login <username> <password>`);
+  console.log(`    mpx-awa publish ${domain}`);
   console.log("");
 };

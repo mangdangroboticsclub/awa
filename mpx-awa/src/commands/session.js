@@ -4,7 +4,7 @@
  * mpx-awa session — Manage AWA sessions.
  *
  * Usage:
- *   mpx-awa session start <domain>     Create a new session
+ *   mpx-awa session start <skill_id> --robot <uuid>
  *   mpx-awa session list                List active sessions
  *   mpx-awa session get <id>            Get session status
  *   mpx-awa session action <id> <action> [params_json]
@@ -14,6 +14,7 @@
 const http = require("http");
 
 const WORKER_URL = process.env.AWA_WORKER_URL || "http://localhost:9808";
+const GATEWAY_URL = process.env.GATEWAY_URL || process.env.MPX_GATEWAY_URL || "http://localhost:8080";
 
 module.exports = function session(args) {
   const subcommand = args[0];
@@ -24,8 +25,12 @@ module.exports = function session(args) {
   }
 
   switch (subcommand) {
-    case "start":
-      return cmdStart(args[1]);
+    case "start": {
+      const robotIdx = args.indexOf("--robot");
+      const robotUuid = robotIdx !== -1 && args[robotIdx + 1] ? args[robotIdx + 1] : null;
+      const skillId = args[1];
+      return cmdStart(skillId, robotUuid);
+    }
     case "list":
       return cmdList();
     case "get":
@@ -47,23 +52,45 @@ mpx-awa session — Manage AWA sessions
 
 USAGE
 
-  mpx-awa session start <domain>       Create a new session
-  mpx-awa session list                  List active sessions (via health)
-  mpx-awa session get <id>              Get session status
-  mpx-awa session action <id> <action>  Dispatch an action
-    [params_json]                         Optional JSON params string
-  mpx-awa session end <id>              End a session
+  mpx-awa session start <skill_id> --robot <uuid>       Create a new session
+  mpx-awa session list                                   List active sessions
+  mpx-awa session get <id>                               Get session status
+  mpx-awa session action <id> <action> [params_json]     Dispatch an action
+  mpx-awa session end <id>                               End a session
+
+  --robot is required — verifies the skill is assigned to the robot.
 
 EXAMPLES
 
-  mpx-awa session start bestbuy.com
+  mpx-awa session start haris_dev~amazon --robot MPX-DOG-01
   mpx-awa session get sess_abc123
   mpx-awa session action sess_abc123 search '{"query":"laptop"}'
   mpx-awa session end sess_abc123
 `);
 }
 
-// ─── API helper ─────────────────────────────────────────────────────────────
+function gatewayApiGet(path) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(GATEWAY_URL);
+    const options = {
+      hostname: urlObj.hostname,
+      port: urlObj.port,
+      path,
+      method: "GET",
+      timeout: 10000,
+    };
+    const req = http.request(options, (res) => {
+      let body = "";
+      res.on("data", (chunk) => (body += chunk));
+      res.on("end", () => {
+        try { resolve(JSON.parse(body)); }
+        catch { reject(new Error(`Invalid JSON: ${body.slice(0, 100)}`)); }
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 function apiPost(path, body) {
   return new Promise((resolve, reject) => {
@@ -80,19 +107,14 @@ function apiPost(path, body) {
       },
       timeout: 60000,
     };
-
     const req = http.request(options, (res) => {
       let respBody = "";
       res.on("data", (chunk) => (respBody += chunk));
       res.on("end", () => {
-        try {
-          resolve(JSON.parse(respBody));
-        } catch {
-          reject(new Error(`Invalid JSON: ${respBody.slice(0, 100)}`));
-        }
+        try { resolve(JSON.parse(respBody)); }
+        catch { reject(new Error(`Invalid JSON: ${respBody.slice(0, 100)}`)); }
       });
     });
-
     req.on("error", reject);
     req.write(data);
     req.end();
@@ -109,33 +131,52 @@ function apiGet(path) {
       method: "GET",
       timeout: 10000,
     };
-
     const req = http.request(options, (res) => {
       let body = "";
       res.on("data", (chunk) => (body += chunk));
       res.on("end", () => {
-        try {
-          resolve(JSON.parse(body));
-        } catch {
-          reject(new Error(`Invalid JSON: ${body.slice(0, 100)}`));
-        }
+        try { resolve(JSON.parse(body)); }
+        catch { reject(new Error(`Invalid JSON: ${body.slice(0, 100)}`)); }
       });
     });
-
     req.on("error", reject);
     req.end();
   });
 }
 
-// ─── Commands ───────────────────────────────────────────────────────────────
-
-async function cmdStart(domain) {
-  if (!domain) {
-    console.error("Usage: mpx-awa session start <domain>");
+async function cmdStart(skillId, robotUuid) {
+  if (!skillId) {
+    console.error("Usage: mpx-awa session start <skill_id> --robot <uuid>");
+    process.exit(1);
+  }
+  if (!robotUuid) {
+    console.error("Error: --robot <uuid> is required for session start");
+    console.error("Usage: mpx-awa session start <skill_id> --robot <uuid>");
     process.exit(1);
   }
   try {
-    const result = await apiPost("/v1/awa/session/start", { domain });
+    const skill = await gatewayApiGet(`/v1/skills/${encodeURIComponent(skillId)}`);
+    if (!skill || skill.error) {
+      console.error(`Error: skill "${skillId}" not found on gateway`);
+      process.exit(1);
+    }
+    const version = `v${skill.current_version}`;
+
+    const robotSkills = await gatewayApiGet(`/v1/robots/${encodeURIComponent(robotUuid)}/skills`);
+    if (!Array.isArray(robotSkills)) {
+      console.error(`Error: robot "${robotUuid}" not found on gateway`);
+      process.exit(1);
+    }
+    const assigned = robotSkills.find(s => s.skill_id === skillId);
+    if (!assigned) {
+      console.error(`Error: skill "${skillId}" is not assigned to robot "${robotUuid}"`);
+      const ids = robotSkills.map(s => s.skill_id).join(", ");
+      console.error(`Assigned skills: ${ids || "(none)"}`);
+      process.exit(1);
+    }
+    console.error(`  ✓ Skill "${skillId}" verified for robot ${robotUuid}`);
+
+    const result = await apiPost("/v1/awa/session/start", { skill_id: skillId, version, robot_uuid: robotUuid });
     console.log(JSON.stringify(result, null, 2));
   } catch (err) {
     console.error(`Error: ${err.message}`);
@@ -176,25 +217,16 @@ async function cmdAction(sessionId, actionName, paramsJson) {
   }
   let params = {};
   if (paramsJson) {
-    try {
-      params = JSON.parse(paramsJson);
-    } catch {
-      console.error("Error: params_json must be valid JSON");
-      process.exit(1);
-    }
+    try { params = JSON.parse(paramsJson); }
+    catch { console.error("Error: params_json must be valid JSON"); process.exit(1); }
   }
   try {
-    const result = await apiPost(`/v1/awa/session/${sessionId}/action`, {
-      action: actionName,
-      params,
-    });
+    const result = await apiPost(`/v1/awa/session/${sessionId}/action`, { action: actionName, params });
     if (result.status === "success") {
       console.log(JSON.stringify(result.data, null, 2));
     } else {
       console.log(`Status: ${result.status}`);
-      if (result.errorDetails) {
-        console.log(`Error:  ${result.errorDetails}`);
-      }
+      if (result.errorDetails) console.log(`Error:  ${result.errorDetails}`);
     }
   } catch (err) {
     console.error(`Error: ${err.message}`);
