@@ -149,14 +149,33 @@ class BrowserPool {
     }
 
     // Create a new isolated browser context with realistic fingerprint
+    // Vary viewport and locale per context to reduce fingerprint correlation
+    var seed = Math.random();
+    var viewportWidth = [1280, 1366, 1440, 1536, 1600, 1920][Math.floor(seed * 6)];
+    var viewportHeight = [720, 768, 800, 864, 900, 1080][Math.floor(seed * 6)];
+    var timezones = ["America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Phoenix", "Europe/London", "Europe/Berlin", "Asia/Tokyo"];
+    var tz = timezones[Math.floor(seed * timezones.length)];
+    var locales = ["en-US", "en-GB", "en-CA", "en-AU"];
+    var locale = locales[Math.floor(seed * locales.length)];
+
     const contextOptions = {
-      viewport: { width: 1920, height: 1080 },
-      locale: "en-US",
-      timezoneId: "America/New_York",
+      viewport: { width: viewportWidth, height: viewportHeight },
+      locale: locale,
+      timezoneId: tz,
       geolocation: { latitude: 40.7128, longitude: -74.006 },
       permissions: ["geolocation"],
+      // Use a modern Chrome user-agent that matches the actual browser build
       userAgent:
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+      // Disable WebDriver flag and automation cues
+      bypassCSP: true,
+      ignoreHTTPSErrors: true,
+      // Set color scheme to avoid forced dark-mode fingerprint
+      colorScheme: "light",
+      // Reasonable device scale factor
+      deviceScaleFactor: 1,
+      hasTouch: false,
+      isMobile: false,
     };
     const proxyConfig = getContextProxyConfig();
     if (proxyConfig) {
@@ -168,22 +187,27 @@ class BrowserPool {
     // Create a fresh page
     const page = await context.newPage();
 
-    // Apply page-level stealth overrides to evade bot detection
+    // ╔══════════════════════════════════════════════════════════════════╗
+    // ║  Page-level stealth overrides to evade bot detection           ║
+    // ║  These run before any page JS executes.                        ║
+    // ║  Without these, Amazon's bot-detection JS will flag the        ║
+    // ║  session as headless/automated.                                ║
+    // ╚══════════════════════════════════════════════════════════════════╝
     await page.addInitScript(() => {
-      // Override navigator.webdriver
+      // ─── Override navigator.webdriver (most important) ───
       Object.defineProperty(navigator, "webdriver", { get: () => false });
 
-      // Override navigator.plugins to appear as a normal browser
+      // ─── Override navigator.plugins — headless returns 0 length ───
       Object.defineProperty(navigator, "plugins", {
         get: () => [1, 2, 3, 4, 5],
       });
 
-      // Override navigator.languages
+      // ─── Override navigator.languages ───
       Object.defineProperty(navigator, "languages", {
         get: () => ["en-US", "en"],
       });
 
-      // Override chrome.runtime (present in real Chrome, absent in headless)
+      // ─── Override chrome.runtime — missing in headless ───
       if (!window.chrome) {
         window.chrome = {};
       }
@@ -194,7 +218,7 @@ class BrowserPool {
         onConnect: { addListener: () => {} },
       };
 
-      // Override permissions query to avoid detection
+      // ─── Override permissions.query to include notifications ───
       const originalQuery = window.navigator.permissions?.query;
       if (originalQuery) {
         window.navigator.permissions.query = (params) =>
@@ -202,6 +226,42 @@ class BrowserPool {
             ? Promise.resolve({ state: Notification.permission })
             : originalQuery(params);
       }
+
+      // ─── Override the webdriver active attribute ───
+      Object.defineProperty(navigator, "webdriver", { get: () => false });
+
+      // ─── Remove AutomationControlled flag from document ───
+      Object.defineProperty(document, "$cdc_asdjflasutopfhvcZLmcfl_", { get: () => undefined });
+
+      // ─── Spoof navigator.hardwareConcurrency (headless: 2, real: 4-16) ───
+      Object.defineProperty(navigator, "hardwareConcurrency", { get: () => 8 });
+
+      // ─── Spoof navigator.deviceMemory (headless: undefined, real: 8) ───
+      Object.defineProperty(navigator, "deviceMemory", { get: () => 8 });
+
+      // ─── Spoof navigator.connection ───
+      if (navigator.connection) {
+        Object.defineProperty(navigator.connection, "rtt", { get: () => 100 });
+        Object.defineProperty(navigator.connection, "downlink", { get: () => 10 });
+        Object.defineProperty(navigator.connection, "effectiveType", { get: () => "4g" });
+      }
+
+      // ─── Ensure WebGL vendor/renderer look real ───
+      var getExt = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+        var ctx = getExt.call(this, type, attrs);
+        if (ctx && ctx.getParameter) {
+          var origGetParam = ctx.getParameter.bind(ctx);
+          ctx.getParameter = function(param) {
+            // UNMASKED_VENDOR_WEBGL — report real GPU vendor
+            if (param === 0x9245) return "Google Inc. (Intel)";
+            // UNMASKED_RENDERER_WEBGL — report real renderer
+            if (param === 0x9246) return "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0)";
+            return origGetParam(param);
+          };
+        }
+        return ctx;
+      };
     });
 
     this.activeContexts.add(context);

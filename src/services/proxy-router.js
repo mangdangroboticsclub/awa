@@ -3,6 +3,27 @@
 /**
  * Proxy Router — Routes egress traffic through a rotating residential proxy.
  *
+ * ╔══════════════════════════════════════════════════════════════════════════╗
+ * ║  🚨 AMAZON BOT DETECTION WARNING                                      ║
+ * ║                                                                        ║
+ * ║  Amazon aggressively blocks datacenter IPs and headless browsers.      ║
+ * ║  Without a residential proxy (PROXY_MODE=residential), all Amazon     ║
+ * ║  skill actions will likely return status="blocked".                    ║
+ * ║                                                                        ║
+ * ║  Symptoms of detection:                                                ║
+ * ║    - skill returns { status: "blocked", detection: ["CAPTCHA"] }       ║
+ * ║    - Worker logs "Amazon bot detection — blocking"                     ║
+ * ║    - Page redirects to amazon.com homepage instead of search results   ║
+ * ║                                                                        ║
+ * ║  Solutions (recommended proxy providers):                              ║
+ * ║    1. Brightdata (brightdata.com) — best for Amazon                    ║
+ * ║    2. Oxylabs (oxylabs.io) — good rotating residential pool            ║
+ * ║    3. Smartproxy (smartproxy.com) — budget option                      ║
+ * ║    4. IPRoyal (iproyal.com) — rotating residential                     ║
+ * ║                                                                        ║
+ * ║  See docker-compose.yml for configuration.                             ║
+ * ╚══════════════════════════════════════════════════════════════════════════╝
+ *
  * In production, all Playwright browser traffic egresses through a rotating
  * residential proxy provider to:
  *   - Bypass geo-restrictions
@@ -12,8 +33,6 @@
  *
  * In local development (PROXY_MODE=none), the proxy is bypassed —
  * traffic goes directly to merchant sites.
- *
- * See ARCHITECTURE.md §6 (Network Architecture) and LOCAL_AWA_SETUP.md §6.1.
  */
 
 const logger = require("../utils/logger");
@@ -26,7 +45,57 @@ const CONFIG = {
   mode: process.env.PROXY_MODE || "none",
   providerUrl: process.env.PROXY_PROVIDER_URL || "",
   apiKey: process.env.PROXY_API_KEY || "",
+  // Optional: country filter for residential IPs (e.g., "US", "GB")
+  country: process.env.PROXY_COUNTRY || "",
+  // Optional: stickiness — reuse same IP for a session duration
+  sessionDuration: parseInt(process.env.PROXY_SESSION_DURATION_MS, 10) || 5 * 60 * 1000,
 };
+
+/**
+ * Get a proxy server URL with optional API key injection.
+ *
+ * Supports these proxy provider formats:
+ *
+ *   Brightdata (recommended):
+ *     PROXY_PROVIDER_URL=http://brd-customer-<CUSTOMER>-zone-<ZONE>:<PASS>@zproxy.lum-superproxy.io:22225
+ *     PROXY_COUNTRY=us
+ *     → Generates: http://brd-customer-<CUSTOMER>-zone-<ZONE>-country-us:<PASS>@zproxy.lum-superproxy.io:22225
+ *
+ *   Oxylabs:
+ *     PROXY_PROVIDER_URL=http://customer-<CUSTOMER>:<PASS>@pr.oxylabs.io:7777
+ *     → Generates: http://customer-<CUSTOMER>:<PASS>@pr.oxylabs.io:7777
+ *
+ *   Smartproxy:
+ *     PROXY_PROVIDER_URL=http://<USER>:<PASS>@gate.smartproxy.com:10000
+ *     → Generates: http://<USER>:<PASS>@gate.smartproxy.com:10000
+ *
+ *   IPRoyal:
+ *     PROXY_PROVIDER_URL=http://<TOKEN>:@residential.iproyal.com:12323
+ *     → Generates: http://<TOKEN>:@residential.iproyal.com:12323
+ */
+function _buildProxyUrl() {
+  if (!CONFIG.providerUrl) {
+    return "";
+  }
+
+  let url = CONFIG.providerUrl;
+
+  // Inject API key if the URL contains a placeholder for it
+  if (CONFIG.apiKey && url.indexOf("{API_KEY}") !== -1) {
+    url = url.replace("{API_KEY}", CONFIG.apiKey);
+  }
+
+  // Inject country filter for Brightdata-style proxy URLs
+  if (CONFIG.country && url.indexOf("-country-") === -1) {
+    // Brightdata: inject country into the zone
+    url = url.replace(
+      /(brd-customer-[^@]+-zone-)([^:]+)/,
+      "$1$2-country-" + CONFIG.country.toLowerCase()
+    );
+  }
+
+  return url;
+}
 
 /**
  * Build Playwright launch options based on the proxy configuration.
@@ -53,20 +122,33 @@ function getBrowserLaunchOptions() {
       "--ignore-certificate-errors",
       "--disable-sync",
       "--lang=en-US",
+      // --- Additional anti-fingerprinting ---
+      "--disable-background-networking",
+      "--disable-background-timer-throttling",
+      "--disable-backgrounding-occluded-windows",
+      "--disable-breakpad",
+      "--disable-component-extensions-with-background-pages",
+      "--disable-extensions",
+      "--disable-features=TranslateUI",
+      "--disable-ipc-flooding-protection",
+      "--enable-features=NetworkService,NetworkServiceInProcess",
+      "--disable-default-apps",
+      "--disable-domain-reliability",
+      "--disable-field-trial-config",
+      "--disable-site-isolation-trials",
+      "--disable-component-update",
     ],
   };
 
   if (CONFIG.mode === "residential" && CONFIG.providerUrl) {
-    // Residential proxy configuration
-    // Format: http://user:pass@provider-host:port
-    const proxyUrl = CONFIG.providerUrl;
-    if (CONFIG.apiKey) {
-      // Inject API key into proxy URL if needed
-      // (exact format depends on the proxy provider)
+    const proxyUrl = _buildProxyUrl();
+    if (proxyUrl) {
       options.args.push(`--proxy-server=${proxyUrl}`);
     }
 
     logger.info("ProxyRouter: residential proxy configured", {
+      mode: CONFIG.mode,
+      country: CONFIG.country || "none",
       providerUrl: proxyUrl.replace(/\/\/.*@/, "//***@"), // redact credentials
     });
   } else {
@@ -88,9 +170,11 @@ function getContextProxyConfig() {
     return null;
   }
 
+  const proxyUrl = _buildProxyUrl();
+  if (!proxyUrl) return null;
+
   return {
-    server: CONFIG.providerUrl,
-    // If the proxy URL contains credentials, Playwright parses them automatically
+    server: proxyUrl,
   };
 }
 
@@ -105,4 +189,5 @@ module.exports = {
   getBrowserLaunchOptions,
   getContextProxyConfig,
   isProxyEnabled,
+  CONFIG,
 };
