@@ -23,8 +23,12 @@
   "files": [
     "bin/",
     "src/",
-    "templates/"
+    "templates/",
+    ".env.sample"
   ],
+  "dependencies": {
+    "dotenv": "^16.4.7"
+  },
   "publishConfig": {
     "access": "public"
   }

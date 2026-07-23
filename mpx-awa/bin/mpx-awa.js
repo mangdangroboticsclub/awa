@@ -24,7 +24,29 @@
  *
  * Gateway host (for login/publish):
  *   Set MPX_GATEWAY_URL env var, or pass --gateway <url> before the subcommand.
+ *
+ * Environment (.env) loading:
+ *   CWD .env takes priority; falls back to .env inside the mpx-awa package.
+ *   Neither file needs to exist — defaults are used when vars are unset.
  */
+
+const path = require("path");
+
+// Load .env files (don't override already-set env vars)
+// Priority: CWD .env (user intent) → package .env (shipped default)
+try {
+  const dotenv = require("dotenv");
+
+  // 1) Per-project .env in current working directory (highest priority)
+  const cwdEnv = path.join(process.cwd(), ".env");
+  dotenv.config({ path: cwdEnv, override: false });
+
+  // 2) .env inside mpx-awa's own installation directory (fallback)
+  const pkgEnv = path.resolve(__dirname, "..", ".env");
+  dotenv.config({ path: pkgEnv, override: false });
+} catch (_) {
+  // dotenv not installed — env vars must be set in the shell
+}
 
 const CLI_NAME = "mpx-awa";
 const CLI_VERSION = require("../package.json").version;
@@ -94,8 +116,17 @@ EXAMPLES
 
 ENVIRONMENT
 
-  AWA_WORKER_URL     Worker URL (default: http://localhost:9808)
-  MPX_GATEWAY_URL    Gateway URL (default: http://localhost:8080)
+${(() => {
+  const gw = process.env.MPX_GATEWAY_URL;
+  const wk = process.env.AWA_WORKER_URL;
+  const gwLine = gw
+    ? `  MPX_GATEWAY_URL    ${gw}`
+    : `  MPX_GATEWAY_URL    (not set, default: http://localhost:8080)`;
+  const wkLine = wk
+    ? `  AWA_WORKER_URL     ${wk}`
+    : `  AWA_WORKER_URL     (not set, default: http://localhost:9808)`;
+  return `${gwLine}\n${wkLine}`;
+})()}
 `);
 }
 
